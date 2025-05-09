@@ -1,0 +1,352 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#ff5555">
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('service-worker.js');
+      });
+    }
+  </script>
+
+  <meta charset="UTF-8">
+  <title>Pomodoro Workspace</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      background: var(--bg-color);
+      color: var(--text-color);
+      padding-top: 50px;
+      transition: background 0.3s, color 0.3s;
+    }
+    :root {
+      --bg-color: #f9f9f9;
+      --text-color: #000;
+    }
+    body.dark {
+      --bg-color: #1e1e1e;
+      --text-color: #f5f5f5;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    #timer {
+      font-size: 48px;
+      margin: 20px 0;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 18px;
+      margin: 5px;
+      border: none;
+      border-radius: 10px;
+      background-color: #ff6b6b;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #ff4c4c;
+    }
+    body.dark button {
+      background-color: #ffffff;
+      color: #000000;
+    }
+    body.dark button:hover {
+      background-color: #dddddd;
+    }
+    input {
+      padding: 8px;
+      width: 60px;
+      font-size: 16px;
+      text-align: center;
+      margin: 5px;
+    }
+    label {
+      font-size: 16px;
+    }
+    #progressContainer {
+      width: 80%;
+      height: 20px;
+      background-color: #e0e0e0;
+      border-radius: 10px;
+      margin: 20px auto;
+      overflow: hidden;
+    }
+    #progressBar {
+      height: 100%;
+      width: 0%;
+      background-color: #4caf50;
+      transition: width 1s linear;
+    }
+    body.dark #progressContainer {
+      background-color: #444;
+    }
+    body.dark #progressBar {
+      background-color: #81c784;
+    }
+  </style>
+</head>
+<body>
+  <h1>Pomodoro Workspace</h1>
+  <button onclick="toggleTheme()" id="themeToggle">🌙 Alternar Tema</button>
+
+  <div id="progressContainer">
+    <div id="progressBar"></div>
+  </div>
+
+  <div id="timer">25:00</div>
+
+  <div>
+    <label>Pomodoro: <input type="number" id="workInput" value="25"></label>
+    <label>Pausa Curta: <input type="number" id="shortInput" value="5"></label>
+    <label>Pausa Longa: <input type="number" id="longInput" value="15"></label>
+  </div>
+
+  <div>
+    <button onclick="startPhase('work')">Começar Pomodoro</button>
+    <button onclick="startPhase('short')">Pausa Curta</button>
+    <button onclick="startPhase('long')">Pausa Longa</button>
+    <button onclick="stopTimer()">Parar</button>
+    <button onclick="resetCycles()">Resetar Ciclos</button>
+    <button onclick="toggleAutoMode()" id="autoModeToggle">🚀 Ciclos Automáticos: OFF</button>
+  </div>
+
+  <div id="cycleCountDisplay">Ciclos completos: 0</div>
+
+  <audio id="alarmSound" src="https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg" preload="auto"></audio>
+
+  <script>
+    let timer;
+    let remaining = 0;
+    let totalTime = 0;
+    let currentPhase = 'work';
+    let cycleCount = 0;
+    let autoCycleCount = 0;
+    let autoMode = false;
+    const cyclesBeforeLongBreak = 4;
+
+    function getMinutes(id, fallback) {
+      const val = parseInt(document.getElementById(id).value);
+      return isNaN(val) ? fallback : val;
+    }
+
+    function updateDisplay() {
+      const minutes = Math.floor(remaining / 60).toString().padStart(2, '0');
+      const seconds = (remaining % 60).toString().padStart(2, '0');
+      document.getElementById('timer').textContent = `${minutes}:${seconds}`;
+    }
+
+    function updateProgress() {
+      const percent = ((totalTime - remaining) / totalTime) * 100;
+      document.getElementById('progressBar').style.width = `${percent}%`;
+    }
+
+    function updateCycleDisplay() {
+      document.getElementById('cycleCountDisplay').textContent = `Ciclos completos: ${cycleCount}`;
+      saveCycles();
+    }
+
+    function saveCycles() {
+      localStorage.setItem('cycleCount', cycleCount);
+    }
+
+    function loadCycles() {
+      const saved = localStorage.getItem('cycleCount');
+      if (saved !== null) {
+        cycleCount = parseInt(saved);
+      }
+    }
+
+    function saveTimes() {
+      localStorage.setItem('workTime', document.getElementById('workInput').value);
+      localStorage.setItem('shortTime', document.getElementById('shortInput').value);
+      localStorage.setItem('longTime', document.getElementById('longInput').value);
+    }
+
+    function loadTimes() {
+      const work = localStorage.getItem('workTime');
+      const short = localStorage.getItem('shortTime');
+      const long = localStorage.getItem('longTime');
+      if (work) document.getElementById('workInput').value = work;
+      if (short) document.getElementById('shortInput').value = short;
+      if (long) document.getElementById('longInput').value = long;
+    }
+
+    function toggleTheme() {
+      const body = document.body;
+      body.classList.toggle('dark');
+      const isDark = body.classList.contains('dark');
+      localStorage.setItem('theme', isDark ? 'dark' : 'light');
+      document.getElementById('themeToggle').textContent = isDark ? '☀️ Alternar Tema' : '🌙 Alternar Tema';
+    }
+
+    function loadTheme() {
+      const savedTheme = localStorage.getItem('theme');
+      if (savedTheme === 'dark') {
+        document.body.classList.add('dark');
+        document.getElementById('themeToggle').textContent = '☀️ Alternar Tema';
+      }
+    }
+
+    function setPhase(phase) {
+      currentPhase = phase;
+      let minutes = 25;
+      if (phase === 'work') minutes = getMinutes('workInput', 25);
+      if (phase === 'short') minutes = getMinutes('shortInput', 5);
+      if (phase === 'long') minutes = getMinutes('longInput', 15);
+      remaining = minutes * 60;
+      totalTime = remaining;
+      updateDisplay();
+      updateProgress();
+    }
+
+    function startPhase(phase) {
+      stopTimer();
+      setPhase(phase);
+      timer = setInterval(runTimer, 1000);
+    }
+
+    function stopTimer() {
+      clearInterval(timer);
+    }
+
+    function resetCycles() {
+      stopTimer();
+      cycleCount = 0;
+      autoCycleCount = 0;
+      localStorage.removeItem('cycleCount');
+      updateCycleDisplay();
+      setPhase('work');
+    }
+
+    function playAlarm() {
+      const alarm = document.getElementById('alarmSound');
+      alarm.currentTime = 0;
+      alarm.play();
+    }
+
+    function toggleAutoMode() {
+      autoMode = !autoMode;
+      document.getElementById('autoModeToggle').textContent =
+        autoMode ? '🚀 Ciclos Automáticos: ON' : '🚀 Ciclos Automáticos: OFF';
+    }
+
+    function runTimer() {
+      if (remaining > 0) {
+        remaining--;
+        updateDisplay();
+        updateProgress();
+      } else {
+        clearInterval(timer);
+        playAlarm();
+
+        if (currentPhase === 'work') {
+          cycleCount++;
+          autoCycleCount++;
+          updateCycleDisplay();
+        }
+
+        if (autoMode) {
+          if (currentPhase === 'work') {
+            if (autoCycleCount % cyclesBeforeLongBreak === 0) {
+              startPhase('long');
+            } else {
+              startPhase('short');
+            }
+          } else {
+            startPhase('work');
+          }
+        }
+      }
+    }
+
+    // Inicialização
+    loadCycles();
+    loadTimes();
+    loadTheme();
+    updateDisplay();
+    updateCycleDisplay();
+    document.getElementById('workInput').addEventListener('input', saveTimes);
+    document.getElementById('shortInput').addEventListener('input', saveTimes);
+    document.getElementById('longInput').addEventListener('input', saveTimes);
+  </script>
+
+  <div id="miniTimer" style="position:fixed;bottom:10px;right:10px;
+    background:#222;color:#fff;padding:10px 15px;border-radius:12px;
+    font-size:20px;font-family:sans-serif;z-index:9999;opacity:0.8;">
+    <span id="miniDisplay">25:00</span>
+  </div>
+
+  <div style="margin-top: 20px;">
+    <label>🔊 Volume:
+      <input type="range" id="volumeControl" min="0" max="1" step="0.01" value="1">
+    </label>
+    <label>🎵 Som:
+      <select id="soundSelect">
+        <option value="digital">Digital</option>
+        <option value="bell">Bell</option>
+        <option value="tone">Tone</option>
+      </select>
+    </label>
+  </div>
+
+  <script>
+    const alarmSound = document.getElementById('alarmSound');
+    const volumeSlider = document.getElementById('volumeControl');
+    const soundSelect = document.getElementById('soundSelect');
+    const miniDisplay = document.getElementById('miniDisplay');
+
+    const soundOptions = {
+      digital: "https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg",
+      bell: "https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg",
+      tone: "https://actions.google.com/sounds/v1/alarms/beep_short.ogg"
+    };
+
+    volumeSlider.addEventListener("input", () => {
+      alarmSound.volume = parseFloat(volumeSlider.value);
+    });
+
+    soundSelect.addEventListener("change", () => {
+      alarmSound.src = soundOptions[soundSelect.value];
+    });
+
+    function updateMiniTimer() {
+      miniDisplay.textContent = document.getElementById('timer').textContent;
+    }
+
+    setInterval(updateMiniTimer, 1000);
+
+    // Notificações
+    if ("Notification" in window) {
+      if (Notification.permission !== "granted") {
+        Notification.requestPermission();
+      }
+    }
+
+    function notifyUser(message) {
+      if (Notification.permission === "granted") {
+        new Notification(message);
+      }
+    }
+
+    // Atualizar playAlarm com notificação
+    function playAlarm() {
+      alarmSound.currentTime = 0;
+      alarmSound.play();
+      let message = "Tempo finalizado!";
+      if (currentPhase === 'work') {
+        message = "Pomodoro finalizado! Hora da pausa.";
+      } else {
+        message = "Pausa finalizada! Hora de voltar.";
+      }
+      notifyUser(message);
+    }
+  </script>
+</body>
+</html>
+
+</html>
